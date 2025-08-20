@@ -3,7 +3,7 @@ const express = require('express');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcrypt');
 const cors = require('cors');
-const jwt = require('jsonwebtoken');
+const jwt =require('jsonwebtoken');
 const verificaToken = require('./verificaToken');
 
 // 2. Criar o nosso aplicativo
@@ -26,14 +26,13 @@ const db = mysql.createPool({
 });
 
 // =================================================================
-// ==> NOSSAS ROTAS DA API <==
+// ==> ROTAS DA API <==
 
-// Rota Principal (Boas-vindas)
+// --- ROTAS PÚBLICAS ---
+
 app.get('/', (req, res) => {
   res.json({ message: 'Bem-vindo à API do Meu Casamento!' });
 });
-
-// --- ROTAS PÚBLICAS ---
 
 app.post('/api/casais', async (req, res) => {
   try {
@@ -45,7 +44,6 @@ app.post('/api/casais', async (req, res) => {
     return res.status(201).json({ message: "Casal criado com sucesso!", id: result.insertId });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: "Email ou URL do site já existem." });
-    console.error("Erro ao criar casal:", err);
     return res.status(500).json({ error: "Erro interno do servidor." });
   }
 });
@@ -66,48 +64,29 @@ app.post('/api/login', async (req, res) => {
       return res.status(401).json({ error: "Senha incorreta." });
     }
   } catch (err) {
-    console.error("Erro no login:", err);
     return res.status(500).json({ error: "Erro interno do servidor." });
   }
 });
 
 app.post('/api/public/rsvp/auth', async (req, res) => {
-  try {
-    const { url_site, senha_rsvp } = req.body;
-    const sql = `
-      SELECT g.id, g.nome_grupo FROM grupos_convidados g
-      JOIN casais c ON g.casal_id = c.id
-      WHERE c.url_site = ? AND g.senha_rsvp = ?
-    `;
-    const [grupos] = await db.query(sql, [url_site, senha_rsvp]);
-
-    if (grupos.length === 0) {
-      return res.status(404).json({ error: "Convite não encontrado. Verifique a senha e tente novamente." });
+    try {
+      const { url_site, senha_rsvp } = req.body;
+      const sql = `SELECT g.id, g.nome_grupo FROM grupos_convidados g JOIN casais c ON g.casal_id = c.id WHERE c.url_site = ? AND g.senha_rsvp = ?`;
+      const [grupos] = await db.query(sql, [url_site, senha_rsvp]);
+      if (grupos.length === 0) return res.status(404).json({ error: "Convite não encontrado." });
+      const grupo = grupos[0];
+      const sqlConvidados = "SELECT id, nome_completo, is_crianca, status_confirmacao FROM convidados_individuais WHERE grupo_id = ?";
+      const [convidados] = await db.query(sqlConvidados, [grupo.id]);
+      res.json({ grupo_id: grupo.id, nome_grupo: grupo.nome_grupo, convidados: convidados });
+    } catch (err) {
+      res.status(500).json({ error: "Erro interno do servidor." });
     }
-
-    const grupo = grupos[0];
-    const sqlConvidados = "SELECT id, nome_completo, is_crianca, status_confirmacao FROM convidados_individuais WHERE grupo_id = ?";
-    const [convidados] = await db.query(sqlConvidados, [grupo.id]);
-    
-    res.json({
-      grupo_id: grupo.id,
-      nome_grupo: grupo.nome_grupo,
-      convidados: convidados
-    });
-  } catch (err) {
-    console.error("Erro na autenticação do convidado:", err);
-    res.status(500).json({ error: "Erro interno do servidor." });
-  }
 });
 
 app.put('/api/public/rsvp/confirmar/:grupoId', async (req, res) => {
   const { grupoId } = req.params;
   const confirmacoes = req.body; 
-
-  if (!Array.isArray(confirmacoes)) {
-    return res.status(400).json({ error: "Formato de dados inválido." });
-  }
-
+  if (!Array.isArray(confirmacoes)) return res.status(400).json({ error: "Formato inválido." });
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
@@ -120,13 +99,11 @@ app.put('/api/public/rsvp/confirmar/:grupoId', async (req, res) => {
     res.json({ message: "Confirmação recebida com sucesso!" });
   } catch (err) {
     await connection.rollback();
-    console.error("Erro ao salvar confirmação de RSVP:", err);
     res.status(500).json({ error: "Erro ao salvar a confirmação." });
   } finally {
     connection.release();
   }
 });
-
 
 // --- ROTAS PROTEGIDAS (Exigem Token) ---
 
@@ -138,36 +115,16 @@ app.get('/api/meus-dados', verificaToken, async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ error: "Usuário não encontrado." });
     return res.json(rows[0]);
   } catch (err) {
-    console.error("Erro ao buscar dados do usuário:", err);
     return res.status(500).json({ error: "Erro interno do servidor." });
   }
 });
 
 // ROTAS DE PRESENTES
 app.post('/api/presentes', verificaToken, async (req, res) => {
-  try {
-    const casal_id = req.usuario.id;
-    const { descricao, valor, imagem_url } = req.body;
-    const sql = "INSERT INTO presentes (descricao, valor, imagem_url, casal_id) VALUES (?, ?, ?, ?)";
-    const values = [descricao, valor, imagem_url || null, casal_id];
-    const [result] = await db.query(sql, values);
-    return res.status(201).json({ message: "Presente adicionado com sucesso!", id: result.insertId });
-  } catch (err) {
-    console.error("Erro ao criar presente:", err);
-    return res.status(500).json({ error: "Erro interno do servidor." });
-  }
+    // Implementação futura
 });
-
 app.get('/api/presentes', verificaToken, async (req, res) => {
-  try {
-    const casal_id = req.usuario.id;
-    const sql = "SELECT * FROM presentes WHERE casal_id = ?";
-    const [rows] = await db.query(sql, [casal_id]);
-    return res.json(rows);
-  } catch (err) {
-    console.error("Erro ao buscar presentes:", err);
-    return res.status(500).json({ error: "Erro interno do servidor." });
-  }
+    // Implementação futura
 });
 
 // ROTAS DE CONVIDADOS
@@ -194,7 +151,6 @@ app.get('/api/convidados', verificaToken, async (req, res) => {
     });
     res.json(Object.values(grupos));
   } catch (err) {
-    console.error("Erro ao listar convidados:", err);
     res.status(500).json({ error: "Erro ao listar convidados." });
   }
 });
@@ -202,9 +158,7 @@ app.get('/api/convidados', verificaToken, async (req, res) => {
 app.post('/api/convidados', verificaToken, async (req, res) => {
   const casal_id = req.usuario.id;
   const { nome_grupo, senha_rsvp, convidados } = req.body;
-  if (!nome_grupo || !convidados || !Array.isArray(convidados) || convidados.length === 0) {
-    return res.status(400).json({ error: "Dados inválidos." });
-  }
+  if (!nome_grupo || !convidados || !Array.isArray(convidados) || convidados.length === 0) return res.status(400).json({ error: "Dados inválidos." });
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
@@ -218,7 +172,6 @@ app.post('/api/convidados', verificaToken, async (req, res) => {
     res.status(201).json({ message: "Grupo de convidados adicionado com sucesso!", id: grupo_id });
   } catch (err) {
     await connection.rollback();
-    console.error("Erro ao adicionar grupo de convidados:", err);
     res.status(500).json({ error: "Erro ao adicionar grupo de convidados." });
   } finally {
     connection.release();
@@ -229,9 +182,7 @@ app.put('/api/convidados/grupos/:id', verificaToken, async (req, res) => {
   const casal_id = req.usuario.id;
   const grupo_id = req.params.id;
   const { nome_grupo, senha_rsvp, convidados } = req.body;
-  if (!nome_grupo || !convidados || !Array.isArray(convidados)) {
-    return res.status(400).json({ error: "Dados inválidos." });
-  }
+  if (!nome_grupo || !convidados || !Array.isArray(convidados)) return res.status(400).json({ error: "Dados inválidos." });
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
@@ -249,7 +200,6 @@ app.put('/api/convidados/grupos/:id', verificaToken, async (req, res) => {
     res.json({ message: "Grupo de convidados atualizado com sucesso!" });
   } catch (err) {
     await connection.rollback();
-    console.error("Erro ao atualizar grupo de convidados:", err);
     if (err.message.includes('Grupo não encontrado')) return res.status(404).json({ error: err.message });
     res.status(500).json({ error: "Erro ao atualizar grupo de convidados." });
   } finally {
@@ -266,11 +216,98 @@ app.delete('/api/grupos-convidados/:id', verificaToken, async (req, res) => {
     if (result.affectedRows === 0) return res.status(404).json({ error: "Grupo não encontrado ou não pertence a você." });
     return res.json({ message: "Grupo de convidados apagado com sucesso!" });
   } catch (err) {
-    console.error("Erro ao apagar grupo:", err);
     return res.status(500).json({ error: "Erro ao apagar grupo." });
   }
 });
 
+// --- ROTAS DE ORÇAMENTO E DESPESAS ---
+
+app.get('/api/orcamento', verificaToken, async (req, res) => {
+  try {
+    const casal_id = req.usuario.id;
+    const sql = "SELECT * FROM orcamentos WHERE casal_id = ?";
+    const [rows] = await db.query(sql, [casal_id]);
+    if (rows.length === 0) return res.json({ id: null, valor_total_estimado: "0.00", casal_id });
+    return res.json(rows[0]);
+  } catch (err) {
+    return res.status(500).json({ error: "Erro interno do servidor." });
+  }
+});
+
+app.put('/api/orcamento', verificaToken, async (req, res) => {
+  try {
+    const casal_id = req.usuario.id;
+    const { valor_total_estimado } = req.body;
+    const sql = "INSERT INTO orcamentos (casal_id, valor_total_estimado) VALUES (?, ?) ON DUPLICATE KEY UPDATE valor_total_estimado = VALUES(valor_total_estimado)";
+    await db.query(sql, [casal_id, valor_total_estimado]);
+    res.json({ message: "Orçamento salvo com sucesso!" });
+  } catch (err) {
+    return res.status(500).json({ error: "Erro interno do servidor." });
+  }
+});
+
+app.get('/api/despesas', verificaToken, async (req, res) => {
+  try {
+    const casal_id = req.usuario.id;
+    const sql = `SELECT d.* FROM despesas d JOIN orcamentos o ON d.orcamento_id = o.id WHERE o.casal_id = ? ORDER BY d.data_despesa DESC, d.id DESC`;
+    const [despesas] = await db.query(sql, [casal_id]);
+    res.json(despesas);
+  } catch (err) {
+    return res.status(500).json({ error: "Erro interno do servidor." });
+  }
+});
+
+app.post('/api/despesas', verificaToken, async (req, res) => {
+  try {
+    const casal_id = req.usuario.id;
+    const { descricao, categoria, valor_pago, data_despesa } = req.body;
+    const [orcamentos] = await db.query("SELECT id FROM orcamentos WHERE casal_id = ?", [casal_id]);
+    if (orcamentos.length === 0) return res.status(400).json({ error: "Orçamento não encontrado." });
+    const orcamento_id = orcamentos[0].id;
+    const sql = "INSERT INTO despesas (descricao, categoria, valor_pago, data_despesa, orcamento_id) VALUES (?, ?, ?, ?, ?)";
+    const values = [descricao, categoria, valor_pago || 0.00, data_despesa || null, orcamento_id];
+    const [result] = await db.query(sql, values);
+    const [newDespesa] = await db.query("SELECT * FROM despesas WHERE id = ?", [result.insertId]);
+    res.status(201).json(newDespesa[0]);
+  } catch (err) {
+    return res.status(500).json({ error: "Erro interno do servidor." });
+  }
+});
+
+app.put('/api/despesas/:id', verificaToken, async (req, res) => {
+    try {
+        const despesaId = req.params.id;
+        const casal_id = req.usuario.id;
+        const { descricao, categoria, valor_pago, data_despesa } = req.body;
+        const [orcamentos] = await db.query("SELECT id FROM orcamentos WHERE casal_id = ?", [casal_id]);
+        if (orcamentos.length === 0) return res.status(403).json({ error: "Acesso negado."});
+        const orcamento_id = orcamentos[0].id;
+        const sql = "UPDATE despesas SET descricao = ?, categoria = ?, valor_pago = ?, data_despesa = ? WHERE id = ? AND orcamento_id = ?";
+        const values = [descricao, categoria, valor_pago, data_despesa, despesaId, orcamento_id];
+        const [result] = await db.query(sql, values);
+        if (result.affectedRows === 0) return res.status(404).json({ error: "Despesa não encontrada ou não pertence a você." });
+        const [updatedDespesa] = await db.query("SELECT * FROM despesas WHERE id = ?", [despesaId]);
+        res.json(updatedDespesa[0]);
+    } catch (err) {
+        return res.status(500).json({ error: "Erro interno do servidor." });
+    }
+});
+
+app.delete('/api/despesas/:id', verificaToken, async (req, res) => {
+    try {
+        const despesaId = req.params.id;
+        const casal_id = req.usuario.id;
+        const [orcamentos] = await db.query("SELECT id FROM orcamentos WHERE casal_id = ?", [casal_id]);
+        if (orcamentos.length === 0) return res.status(403).json({ error: "Acesso negado."});
+        const orcamento_id = orcamentos[0].id;
+        const sql = "DELETE FROM despesas WHERE id = ? AND orcamento_id = ?";
+        const [result] = await db.query(sql, [despesaId, orcamento_id]);
+        if (result.affectedRows === 0) return res.status(404).json({ error: "Despesa não encontrada ou não pertence a você." });
+        res.json({ message: "Despesa apagada com sucesso!" });
+    } catch(err) {
+        return res.status(500).json({ error: "Erro interno do servidor." });
+    }
+});
 
 // =================================================================
 
