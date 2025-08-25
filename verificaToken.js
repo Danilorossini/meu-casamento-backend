@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const JWT_SECRET = 'seu_segredo_super_secreto_e_longo_para_jwt'; // A MESMA chave secreta do index.js
+const { JWT_SECRET } = require('./config'); // A MESMA chave secreta do index.js
 
 function verificaToken(req, res, next) {
   // O token virá no cabeçalho (header) da requisição
