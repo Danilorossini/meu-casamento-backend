@@ -32,7 +32,223 @@ app.get('/api/despesas', verificaToken, async (req, res) => { try { const casal_
 app.post('/api/despesas', verificaToken, async (req, res) => { try { const casal_id = req.usuario.id; const { descricao, categoria, valor_pago, data_despesa } = req.body; const [orcamentos] = await db.query("SELECT id FROM orcamentos WHERE casal_id = ?", [casal_id]); if (orcamentos.length === 0) return res.status(400).json({ error: "Orçamento não encontrado." }); const orcamento_id = orcamentos[0].id; const sql = "INSERT INTO despesas (descricao, categoria, valor_pago, data_despesa, orcamento_id) VALUES (?, ?, ?, ?, ?)"; const values = [descricao, categoria, valor_pago || 0.00, data_despesa || null, orcamento_id]; const [result] = await db.query(sql, values); const [newDespesa] = await db.query("SELECT * FROM despesas WHERE id = ?", [result.insertId]); res.status(201).json(newDespesa[0]); } catch (err) { return res.status(500).json({ error: "Erro interno do servidor." }); } });
 app.put('/api/despesas/:id', verificaToken, async (req, res) => { try { const despesaId = req.params.id; const casal_id = req.usuario.id; const { descricao, categoria, valor_pago, data_despesa } = req.body; const [orcamentos] = await db.query("SELECT id FROM orcamentos WHERE casal_id = ?", [casal_id]); if (orcamentos.length === 0) return res.status(403).json({ error: "Acesso negado."}); const orcamento_id = orcamentos[0].id; const sql = "UPDATE despesas SET descricao = ?, categoria = ?, valor_pago = ?, data_despesa = ? WHERE id = ? AND orcamento_id = ?"; const values = [descricao, categoria, valor_pago, data_despesa, despesaId, orcamento_id]; const [result] = await db.query(sql, values); if (result.affectedRows === 0) return res.status(404).json({ error: "Despesa não encontrada." }); const [updatedDespesa] = await db.query("SELECT * FROM despesas WHERE id = ?", [despesaId]); res.json(updatedDespesa[0]); } catch (err) { return res.status(500).json({ error: "Erro interno do servidor." }); } });
 app.delete('/api/despesas/:id', verificaToken, async (req, res) => { try { const despesaId = req.params.id; const casal_id = req.usuario.id; const [orcamentos] = await db.query("SELECT id FROM orcamentos WHERE casal_id = ?", [casal_id]); if (orcamentos.length === 0) return res.status(403).json({ error: "Acesso negado."}); const orcamento_id = orcamentos[0].id; const sql = "DELETE FROM despesas WHERE id = ? AND orcamento_id = ?"; const [result] = await db.query(sql, [despesaId, orcamento_id]); if (result.affectedRows === 0) return res.status(404).json({ error: "Despesa não encontrada." }); res.json({ message: "Despesa apagada com sucesso!" }); } catch(err) { return res.status(500).json({ error: "Erro interno do servidor." }); } });
-app.get('/api/admin/casais', verificaAdmin, async (req, res) => { try { const sql = "SELECT id, nome_completo, email, url_site, data_criacao FROM casais WHERE is_admin = false ORDER BY data_criacao DESC"; const [casais] = await db.query(sql); res.json(casais); } catch (err) { console.error("Erro ao buscar todos os casais:", err); res.status(500).json({ error: "Erro interno do servidor." }); } });
+
+// --- ROTAS DE GESTÃO DE CLIENTES (Avançadas) ---
+
+// 1. LER TODOS OS CLIENTES (AGORA COM O NOME DO PLANO)
+app.get('/api/admin/casais', verificaAdmin, async (req, res) => {
+  try {
+    const sql = `
+      SELECT 
+        c.id, 
+        c.nome_completo, 
+        c.email, 
+        c.url_site, 
+        c.data_criacao,
+        p.nome_plano 
+      FROM casais c
+      LEFT JOIN planos p ON c.plano_id = p.id
+      WHERE c.is_admin = false 
+      ORDER BY c.data_criacao DESC
+    `;
+    const [casais] = await db.query(sql);
+    res.json(casais);
+  } catch (err) {
+    console.error("Erro ao buscar todos os casais:", err);
+    res.status(500).json({ error: "Erro interno do servidor." });
+  }
+});
+
+// 2. ATUALIZAR O PLANO DE UM CLIENTE
+app.put('/api/admin/casais/:id/plano', verificaAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { plano_id } = req.body; // O front-end enviará o ID do novo plano
+
+    // Se plano_id for 'nenhum', guardamos NULL no banco de dados.
+    const novoPlanoId = plano_id === 'nenhum' ? null : plano_id;
+
+    const sql = "UPDATE casais SET plano_id = ? WHERE id = ?";
+    const [result] = await db.query(sql, [novoPlanoId, id]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Cliente não encontrado." });
+    }
+    res.json({ message: "Plano do cliente atualizado com sucesso!" });
+  } catch (err) {
+    console.error("Erro ao atualizar o plano do cliente:", err);
+    res.status(500).json({ error: "Erro interno do servidor." });
+  }
+});
+
+
+// 3. REGISTAR UM NOVO CLIENTE (pelo Admin)
+app.post('/api/admin/casais', verificaAdmin, async (req, res) => {
+  try {
+    const { nome_completo, email, senha, plano_id } = req.body;
+
+    // Encriptar a senha antes de guardar
+    const hash = await bcrypt.hash(senha, saltRounds);
+    
+    // Define a data de expiração do trial para 15 dias a partir de agora
+    const trialDate = new Date();
+    trialDate.setDate(trialDate.getDate() + 15);
+
+    const sql = `
+      INSERT INTO casais (nome_completo, email, senha, plano_id, trial_expires_at, is_admin) 
+      VALUES (?, ?, ?, ?, ?, ?)
+    `;
+    const values = [nome_completo, email, hash, plano_id || null, trialDate, false];
+    
+    const [result] = await db.query(sql, values);
+    res.status(201).json({ message: "Cliente criado com sucesso!", id: result.insertId });
+  } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: "Este email já está a ser utilizado." });
+    }
+    console.error("Erro ao criar cliente:", err);
+    res.status(500).json({ error: "Erro interno do servidor." });
+  }
+});
+
+// --- ROTAS DE GESTÃO DE PLANOS (Apenas para Admin) ---
+
+// 1. LER TODOS OS PLANOS
+app.get('/api/admin/planos', verificaAdmin, async (req, res) => {
+  try {
+    const sql = "SELECT * FROM planos ORDER BY preco";
+    const [planos] = await db.query(sql);
+    res.json(planos);
+  } catch (err) {
+    console.error("Erro ao buscar planos:", err);
+    res.status(500).json({ error: "Erro interno do servidor." });
+  }
+});
+
+// 2. CRIAR UM NOVO PLANO
+app.post('/api/admin/planos', verificaAdmin, async (req, res) => {
+  try {
+    const { nome_plano, descricao, preco, preco_promocional, ativo } = req.body;
+    const sql = `
+      INSERT INTO planos (nome_plano, descricao, preco, preco_promocional, ativo) 
+      VALUES (?, ?, ?, ?, ?)
+    `;
+    const values = [nome_plano, descricao, preco, preco_promocional || null, ativo];
+    const [result] = await db.query(sql, values);
+    res.status(201).json({ message: "Plano criado com sucesso!", id: result.insertId });
+  } catch (err) {
+    console.error("Erro ao criar plano:", err);
+    res.status(500).json({ error: "Erro interno do servidor." });
+  }
+});
+
+// 3. ATUALIZAR UM PLANO EXISTENTE
+app.put('/api/admin/planos/:id', verificaAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { nome_plano, descricao, preco, preco_promocional, ativo } = req.body;
+    const sql = `
+      UPDATE planos SET nome_plano = ?, descricao = ?, preco = ?, preco_promocional = ?, ativo = ? 
+      WHERE id = ?
+    `;
+    const values = [nome_plano, descricao, preco, preco_promocional || null, ativo, id];
+    const [result] = await db.query(sql, values);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Plano não encontrado." });
+    }
+    res.json({ message: "Plano atualizado com sucesso!" });
+  } catch (err) {
+    console.error("Erro ao atualizar plano:", err);
+    res.status(500).json({ error: "Erro interno do servidor." });
+  }
+});
+
+// 4. APAGAR UM PLANO
+app.delete('/api/admin/planos/:id', verificaAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const sql = "DELETE FROM planos WHERE id = ?";
+    const [result] = await db.query(sql, [id]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Plano não encontrado." });
+    }
+    res.json({ message: "Plano apagado com sucesso!" });
+  } catch (err) {
+    console.error("Erro ao apagar plano:", err);
+    res.status(500).json({ error: "Erro interno do servidor." });
+  }
+});
+
+// --- ROTA DO RELATÓRIO FINANCEIRO (Apenas para Admin) ---
+
+app.get('/api/admin/relatorio-financeiro', verificaAdmin, async (req, res) => {
+  try {
+    // Pega as datas do filtro. Se não forem enviadas, usa um período padrão (ex: últimos 30 dias).
+    let { data_inicio, data_fim } = req.query;
+
+    if (!data_inicio || !data_fim) {
+      const hoje = new Date();
+      data_fim = hoje.toISOString().split('T')[0]; // Hoje
+      hoje.setDate(hoje.getDate() - 30);
+      data_inicio = hoje.toISOString().split('T')[0]; // 30 dias atrás
+    }
+
+    // Adiciona a hora final para garantir que o dia final seja incluído por completo
+    const dataFimCompleta = `${data_fim} 23:59:59`;
+
+    // 1. Consulta para calcular o total vendido e os dados para o gráfico
+    const sqlVendas = `
+      SELECT 
+        p.nome_plano,
+        COUNT(t.id) as quantidade_vendida,
+        SUM(t.valor_pago) as total_valor
+      FROM transacoes t
+      JOIN planos p ON t.plano_id = p.id
+      WHERE t.data_transacao BETWEEN ? AND ?
+      GROUP BY p.nome_plano;
+    `;
+    const [vendasPorPlano] = await db.query(sqlVendas, [data_inicio, dataFimCompleta]);
+
+    // 2. Consulta para contar os casais registados manualmente pelo admin no período
+    const sqlCadastrosManuais = `
+      SELECT COUNT(id) as quantidade 
+      FROM casais 
+      WHERE is_admin = false AND plano_id IS NULL AND data_criacao BETWEEN ? AND ?
+    `;
+    const [cadastrosManuais] = await db.query(sqlCadastrosManuais, [data_inicio, dataFimCompleta]);
+    
+    // 3. Consulta para obter os totais gerais
+    const sqlTotais = `
+      SELECT 
+        SUM(valor_pago) as faturamento_total,
+        COUNT(id) as total_vendas
+      FROM transacoes
+      WHERE data_transacao BETWEEN ? AND ?
+    `;
+    const [totais] = await db.query(sqlTotais, [data_inicio, dataFimCompleta]);
+
+    // Monta o objeto de resposta final
+    const relatorio = {
+      periodo: {
+        inicio: data_inicio,
+        fim: data_fim
+      },
+      faturamento_total: totais[0].faturamento_total || 0,
+      total_vendas: totais[0].total_vendas || 0,
+      cadastros_manuais: cadastrosManuais[0].quantidade || 0,
+      vendas_por_plano: vendasPorPlano
+    };
+
+    res.json(relatorio);
+
+  } catch (err) {
+    console.error("Erro ao gerar relatório financeiro:", err);
+    res.status(500).json({ error: "Erro interno do servidor." });
+  }
+});
+
 
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
