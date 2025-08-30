@@ -1,3 +1,5 @@
+// no topo do index.js
+require('dotenv').config(); 
 // [VERSÃO DE DIAGNÓSTICO PARA O ERRO DE LOGIN]
 const express = require('express');
 const mysql = require('mysql2/promise');
