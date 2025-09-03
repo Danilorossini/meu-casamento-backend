@@ -41,40 +41,53 @@ app.post('/api/login', async (req, res) => {
     } 
 });
 
-// --- ROTA DE CADASTRO DE CASAIS (COM DIAGNÓSTICO) ---
+// --- ROTA DE CADASTRO DE CASAIS (CORRIGIDA) ---
 app.post('/api/casais', async (req, res) => { 
     try { 
-        const { nome_completo, email, senha, url_site, data_casamento } = req.body; 
+        const { nome_completo, email, senha, data_casamento } = req.body; 
+        
+        // Função para criar uma URL amigável a partir do nome
+        const criarUrlAmigavel = (texto) => {
+            const a = 'àáâäæãåāăąçćčđďèéêëēėęěğǵḧîïíīįìłḿñńǹňôöòóœøōõőṕŕřßśšşșťțûüùúūǘůűųẃẍÿýžźż·/_,:;'
+            const b = 'aaaaaaaaaacccddeeeeeeeegghiiiiiilmnnnnoooooooooprrsssssttuuuuuuuuuwxyyzzz------'
+            const p = new RegExp(a.split('').join('|'), 'g')
+
+            return texto.toString().toLowerCase()
+                .replace(/\s+/g, '-') // Substitui espaços por -
+                .replace(p, c => b.charAt(a.indexOf(c))) // Substitui caracteres especiais
+                .replace(/&/g, '-e-') // Substitui & por '-e-'
+                .replace(/[^\w\-]+/g, '') // Remove todos os caracteres não alfanuméricos
+                .replace(/\-\-+/g, '-') // Substitui múltiplos - por um único -
+                .replace(/^-+/, '') // Remove - do início
+                .replace(/-+$/, '') // Remove - do final
+        }
+
+        // Gera a url_site automaticamente
+        const url_site = criarUrlAmigavel(nome_completo);
+        
         const hash = await bcrypt.hash(senha, saltRounds); 
         const sql = "INSERT INTO casais (nome_completo, email, senha, url_site, data_casamento, is_admin, trial_expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)"; 
         
         const trialDate = new Date();
         trialDate.setDate(trialDate.getDate() + 15);
 
-        const values = [nome_completo, email, hash, url_site || null, data_casamento || null, false, trialDate]; 
+        const values = [nome_completo, email, hash, url_site, data_casamento || null, false, trialDate]; 
         
         const [result] = await db.query(sql, values); 
         return res.status(201).json({ message: "Casal criado com sucesso!", id: result.insertId }); 
-    } catch (err) { 
-        // --- LOG DE DIAGNÓSTICO DETALHADO ---
-        console.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-        console.error("!!! ERRO CRÍTICO AO CADASTRAR NOVO CASAL !!!");
-        console.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-        console.error("DADOS RECEBIDOS:", req.body);
-        console.error("ERRO COMPLETO:", err);
-        console.error("--------------------------------------------------");
 
+    } catch (err) { 
+        console.error("ERRO AO CADASTRAR NOVO CASAL:", err);
         if (err.code === 'ER_DUP_ENTRY') {
-            return res.status(409).json({ error: "Email ou URL do site já existem." }); 
+            return res.status(409).json({ error: "Este email ou nome de casal já foi registado." }); 
         }
         return res.status(500).json({ error: "Erro interno do servidor." }); 
     } 
 });
 
 
-// --- RESTANTE DAS ROTAS (sem alterações críticas) ---
+// --- RESTANTE DAS ROTAS ---
 app.get('/', (req, res) => { res.json({ message: 'Bem-vindo à API do Meu Casamento!' }); });
-// ... (O resto do seu ficheiro index.js permanece o mesmo)
 app.get('/api/meus-dados', verificaToken, async (req, res) => { try { const idDoUsuario = req.usuario.id; const sql = "SELECT id, nome_completo, email, data_casamento, url_site, local_cerimonia, hora_cerimonia FROM casais WHERE id = ?"; const [rows] = await db.query(sql, [idDoUsuario]); if (rows.length === 0) return res.status(404).json({ error: "Usuário não encontrado." }); return res.json(rows[0]); } catch (err) { return res.status(500).json({ error: "Erro interno do servidor." }); } });
 app.put('/api/meus-dados', verificaToken, async (req, res) => { try { const idDoUsuario = req.usuario.id; const { nome_completo, email, data_casamento, local_cerimonia, hora_cerimonia } = req.body; const sql = `UPDATE casais SET nome_completo = ?, email = ?, data_casamento = ?, local_cerimonia = ?, hora_cerimonia = ? WHERE id = ?`; const values = [nome_completo, email, data_casamento || null, local_cerimonia, hora_cerimonia || null, idDoUsuario]; const [result] = await db.query(sql, values); if (result.affectedRows === 0) return res.status(404).json({ error: "Usuário não encontrado." }); const [updatedUser] = await db.query("SELECT id, nome_completo, email, data_casamento, url_site, local_cerimonia, hora_cerimonia FROM casais WHERE id = ?", [idDoUsuario]); res.json(updatedUser[0]); } catch (err) { if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: "Este email já está em uso." }); return res.status(500).json({ error: "Erro interno do servidor." }); } });
 app.get('/api/convidados', verificaToken, async (req, res) => { const casal_id = req.usuario.id; try { const sql = `SELECT g.id, g.nome_grupo, g.senha_rsvp, i.id as convidado_id, i.nome_completo, i.is_crianca, i.status_confirmacao FROM grupos_convidados g LEFT JOIN convidados_individuais i ON g.id = i.grupo_id WHERE g.casal_id = ? ORDER BY g.nome_grupo, i.nome_completo;`; const [rows] = await db.query(sql, [casal_id]); const grupos = {}; rows.forEach(row => { if (!grupos[row.id]) { grupos[row.id] = { id: row.id, nome_grupo: row.nome_grupo, senha_rsvp: row.senha_rsvp, convidados: [] }; } if (row.convidado_id) { grupos[row.id].convidados.push({ id: row.convidado_id, nome_completo: row.nome_completo, is_crianca: !!row.is_crianca, status_confirmacao: row.status_confirmacao }); } }); res.json(Object.values(grupos)); } catch (err) { res.status(500).json({ error: "Erro ao listar convidados." }); } });
@@ -138,3 +151,4 @@ app.post('/api/public/rsvp/auth', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });
+
