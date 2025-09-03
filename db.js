@@ -10,14 +10,16 @@ const dbConfig = {
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-  // Adiciona uma camada de segurança SSL/TLS à ligação
-  // Rejeita ligações que não são seguras, o que é preferido por muitos hosts
-  ssl: {
-    rejectUnauthorized: false 
-  }
 };
 
-// Cria o "pool" de ligações com a nova configuração
+// --- LOG DE DIAGNÓSTICO ---
+// Isto irá aparecer nos logs do Render quando o servidor iniciar,
+// mostrando-nos exatamente as configurações que ele está a usar.
+console.log("--- INICIANDO COM A SEGUINTE CONFIGURAÇÃO DE DB ---");
+console.log({ ...dbConfig, password: '*** SENHA OCULTA ***' });
+console.log("-------------------------------------------------");
+
+// Cria o "pool" de ligações
 const db = mysql.createPool(dbConfig);
 
 module.exports = db;
