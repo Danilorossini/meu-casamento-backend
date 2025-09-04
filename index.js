@@ -256,6 +256,48 @@ app.post('/api/public/rsvp/auth', async (req, res) => {
         res.status(500).json({ error: "Erro interno do servidor." });
     }
 });
+
+// ================================================================
+// NOVA ROTA PARA CONFIRMAR PRESENÇA (RSVP)
+// ================================================================
+app.put('/api/public/rsvp/confirmar', async (req, res) => {
+    try {
+        const { confirmacoes } = req.body; // Ex: { '101': 'Presente', '102': 'Ausente' }
+
+        if (!confirmacoes || typeof confirmacoes !== 'object' || Object.keys(confirmacoes).length === 0) {
+            return res.status(400).json({ error: "Dados de confirmação inválidos." });
+        }
+
+        const connection = await db.getConnection();
+        try {
+            await connection.beginTransaction();
+
+            const promessasDeUpdate = Object.entries(confirmacoes).map(([convidadoId, status]) => {
+                const sql = "UPDATE convidados_individuais SET status_confirmacao = ? WHERE id = ?";
+                // Validação simples do status
+                const statusValido = ['Presente', 'Ausente'].includes(status) ? status : 'Pendente';
+                return connection.query(sql, [statusValido, convidadoId]);
+            });
+
+            await Promise.all(promessasDeUpdate);
+
+            await connection.commit();
+            res.json({ message: "Confirmação de presença salva com sucesso!" });
+
+        } catch (err) {
+            await connection.rollback();
+            throw err; // Joga o erro para o catch principal
+        } finally {
+            connection.release();
+        }
+
+    } catch (err) {
+        console.error("Erro ao salvar confirmação de RSVP:", err);
+        res.status(500).json({ error: "Erro interno do servidor ao salvar confirmação." });
+    }
+});
+
+
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });
