@@ -21,24 +21,24 @@ const saltRounds = 10;
 
 // Rota de Login (sem alterações)
 app.post('/api/login', async (req, res) => { 
-    try { 
-        const { email, senha } = req.body; 
-        const sql = "SELECT * FROM casais WHERE email = ?"; 
-        const [rows] = await db.query(sql, [email]); 
-        if (rows.length === 0) return res.status(404).json({ error: "Usuário não encontrado." }); 
-        const usuario = rows[0]; 
-        const isMatch = await bcrypt.compare(senha, usuario.senha); 
-        if (isMatch) { 
-            const payload = { id: usuario.id, email: usuario.email, is_admin: usuario.is_admin }; 
-            const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '8h' }); 
-            return res.json({ message: "Login bem-sucedido!", token: token, is_admin: !!usuario.is_admin }); 
-        } else { 
-            return res.status(401).json({ error: "Senha incorreta." }); 
-        } 
-    } catch (err) { 
-        console.error("!!! ERRO CRÍTICO NA ROTA DE LOGIN !!!", err);
-        return res.status(500).json({ error: "Erro interno do servidor." }); 
-    } 
+    try { 
+        const { email, senha } = req.body; 
+        const sql = "SELECT * FROM casais WHERE email = ?"; 
+        const [rows] = await db.query(sql, [email]); 
+        if (rows.length === 0) return res.status(404).json({ error: "Usuário não encontrado." }); 
+        const usuario = rows[0]; 
+        const isMatch = await bcrypt.compare(senha, usuario.senha); 
+        if (isMatch) { 
+            const payload = { id: usuario.id, email: usuario.email, is_admin: usuario.is_admin }; 
+            const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '8h' }); 
+            return res.json({ message: "Login bem-sucedido!", token: token, is_admin: !!usuario.is_admin }); 
+        } else { 
+            return res.status(401).json({ error: "Senha incorreta." }); 
+        } 
+    } catch (err) { 
+        console.error("!!! ERRO CRÍTICO NA ROTA DE LOGIN !!!", err);
+        return res.status(500).json({ error: "Erro interno do servidor." }); 
+    } 
 });
 
 // --- ROTA DE CADASTRO DE CASAIS (CORRIGIDA) ---
@@ -98,8 +98,74 @@ app.get('/api/orcamento', verificaToken, async (req, res) => { try { const casal
 app.put('/api/orcamento', verificaToken, async (req, res) => { try { const casal_id = req.usuario.id; const { valor_total_estimado } = req.body; const sql = "INSERT INTO orcamentos (casal_id, valor_total_estimado) VALUES (?, ?) ON DUPLICATE KEY UPDATE valor_total_estimado = VALUES(valor_total_estimado)"; await db.query(sql, [casal_id, valor_total_estimado]); res.json({ message: "Orçamento salvo com sucesso!" }); } catch (err) { return res.status(500).json({ error: "Erro interno do servidor." }); } });
 app.get('/api/despesas', verificaToken, async (req, res) => { try { const casal_id = req.usuario.id; const sql = `SELECT d.* FROM despesas d JOIN orcamentos o ON d.orcamento_id = o.id WHERE o.casal_id = ? ORDER BY d.data_despesa DESC, d.id DESC`; const [despesas] = await db.query(sql, [casal_id]); res.json(despesas); } catch (err) { return res.status(500).json({ error: "Erro interno do servidor." }); } });
 app.post('/api/despesas', verificaToken, async (req, res) => { try { const casal_id = req.usuario.id; const { descricao, categoria, valor_pago, data_despesa } = req.body; const [orcamentos] = await db.query("SELECT id FROM orcamentos WHERE casal_id = ?", [casal_id]); if (orcamentos.length === 0) return res.status(400).json({ error: "Orçamento não encontrado." }); const orcamento_id = orcamentos[0].id; const sql = "INSERT INTO despesas (descricao, categoria, valor_pago, data_despesa, orcamento_id) VALUES (?, ?, ?, ?, ?)"; const values = [descricao, categoria, valor_pago || 0.00, data_despesa || null, orcamento_id]; const [result] = await db.query(sql, values); const [newDespesa] = await db.query("SELECT * FROM despesas WHERE id = ?", [result.insertId]); res.status(201).json(newDespesa[0]); } catch (err) { return res.status(500).json({ error: "Erro interno do servidor." }); } });
-app.put('/api/despesas/:id', verificaToken, async (req, res) => { try { const despesaId = req.params.id; const casal_id = req.usuario.id; const { descricao, categoria, valor_pago, data_despesa } = req.body; const [orcamentos] = await db.query("SELECT id FROM orcamentos WHERE casal_id = ?", [casal_id]); if (orcamentos.length === 0) return res.status(403).json({ error: "Acesso negado."}); const orcamento_id = orcamentos[0].id; const sql = "UPDATE despesas SET descricao = ?, categoria = ?, valor_pago = ?, data_despesa = ? WHERE id = ? AND orcamento_id = ?"; const values = [descricao, categoria, valor_pago, data_despesa, despesaId, orcamento_id]; const [result] = await db.query(sql, values); if (result.affectedRows === 0) return res.status(404).json({ error: "Despesa não encontrada." }); const [updatedDespesa] = await db.query("SELECT * FROM despesas WHERE id = ?", [despesaId]); res.json(updatedDespesa[0]); } catch (err) { return res.status(500).json({ error: "Erro interno do servidor." }); } });
-app.delete('/api/despesas/:id', verificaToken, async (req, res) => { try { const despesaId = req.params.id; const casal_id = req.usuario.id; const [orcamentos] = await db.query("SELECT id FROM orcamentos WHERE casal_id = ?", [casal_id]); if (orcamentos.length === 0) return res.status(403).json({ error: "Acesso negado."}); const orcamento_id = orcamentos[0].id; const sql = "DELETE FROM despesas WHERE id = ? AND orcamento_id = ?"; const [result] = await db.query(sql, [despesaId, orcamento_id]); if (result.affectedRows === 0) return res.status(404).json({ error: "Despesa não encontrada." }); res.json({ message: "Despesa apagada com sucesso!" }); } catch(err) { return res.status(500).json({ error: "Erro interno do servidor." }); } });
+
+// ROTA PARA ATUALIZAR UMA DESPESA - CORRIGIDA
+app.put('/api/despesas/:id', verificaToken, async (req, res) => { 
+    try { 
+        // ---- ALTERAÇÃO AQUI ----
+        // Usamos parseInt para garantir que o ID é um número inteiro.
+        // Se o ID for "6:1", parseInt(req.params.id, 10) resultará em 6.
+        const despesaId = parseInt(req.params.id, 10);
+
+        // Adicionamos uma verificação para o caso de o ID não ser um número válido
+        if (isNaN(despesaId)) {
+            return res.status(400).json({ error: "ID de despesa inválido." });
+        }
+        // ---- FIM DA ALTERAÇÃO ----
+        
+        const casal_id = req.usuario.id; 
+        const { descricao, categoria, valor_pago, data_despesa } = req.body; 
+        
+        const [orcamentos] = await db.query("SELECT id FROM orcamentos WHERE casal_id = ?", [casal_id]); 
+        if (orcamentos.length === 0) return res.status(403).json({ error: "Acesso negado."}); 
+        
+        const orcamento_id = orcamentos[0].id; 
+        const sql = "UPDATE despesas SET descricao = ?, categoria = ?, valor_pago = ?, data_despesa = ? WHERE id = ? AND orcamento_id = ?"; 
+        const values = [descricao, categoria, valor_pago, data_despesa, despesaId, orcamento_id]; 
+        
+        const [result] = await db.query(sql, values); 
+        
+        if (result.affectedRows === 0) return res.status(404).json({ error: "Despesa não encontrada." }); 
+        
+        const [updatedDespesa] = await db.query("SELECT * FROM despesas WHERE id = ?", [despesaId]); 
+        res.json(updatedDespesa[0]); 
+    } catch (err) { 
+        console.error("Erro ao atualizar despesa:", err);
+        return res.status(500).json({ error: "Erro interno do servidor." }); 
+    } 
+});
+
+// ROTA PARA APAGAR UMA DESPESA - CORRIGIDA
+app.delete('/api/despesas/:id', verificaToken, async (req, res) => { 
+    try { 
+        // ---- ALTERAÇÃO AQUI ----
+        // Aplicamos a mesma correção para garantir que o ID é um número.
+        const despesaId = parseInt(req.params.id, 10);
+
+        if (isNaN(despesaId)) {
+            return res.status(400).json({ error: "ID de despesa inválido." });
+        }
+        // ---- FIM DA ALTERAÇÃO ----
+
+        const casal_id = req.usuario.id; 
+        
+        const [orcamentos] = await db.query("SELECT id FROM orcamentos WHERE casal_id = ?", [casal_id]); 
+        if (orcamentos.length === 0) return res.status(403).json({ error: "Acesso negado."}); 
+        
+        const orcamento_id = orcamentos[0].id; 
+        const sql = "DELETE FROM despesas WHERE id = ? AND orcamento_id = ?"; 
+        
+        const [result] = await db.query(sql, [despesaId, orcamento_id]); 
+        
+        if (result.affectedRows === 0) return res.status(404).json({ error: "Despesa não encontrada." }); 
+        
+        res.json({ message: "Despesa apagada com sucesso!" }); 
+    } catch(err) { 
+        console.error("Erro ao apagar despesa:", err);
+        return res.status(500).json({ error: "Erro interno do servidor." }); 
+    } 
+});
+
 app.get('/api/cha-de-panela', verificaToken, async (req, res) => { try { const casal_id = req.usuario.id; const sql = "SELECT * FROM cha_de_panela_itens WHERE casal_id = ? ORDER BY data_criacao DESC"; const [itens] = await db.query(sql, [casal_id]); res.json(itens); } catch (err) { console.error("Erro ao buscar itens do Chá de Panela:", err); res.status(500).json({ error: "Erro interno do servidor." }); } });
 app.post('/api/cha-de-panela', verificaToken, async (req, res) => { try { const casal_id = req.usuario.id; const { nome_item, descricao } = req.body; if (!nome_item) { return res.status(400).json({ error: "O nome do item é obrigatório." }); } const sql = "INSERT INTO cha_de_panela_itens (casal_id, nome_item, descricao) VALUES (?, ?, ?)"; const [result] = await db.query(sql, [casal_id, nome_item, descricao]); res.status(201).json({ message: "Item adicionado com sucesso!", id: result.insertId }); } catch (err) { console.error("Erro ao adicionar item:", err); res.status(500).json({ error: "Erro interno do servidor." }); } });
 app.put('/api/cha-de-panela/:id', verificaToken, async (req, res) => { try { const casal_id = req.usuario.id; const { id } = req.params; const { nome_item, descricao } = req.body; const sql = "UPDATE cha_de_panela_itens SET nome_item = ?, descricao = ? WHERE id = ? AND casal_id = ?"; const [result] = await db.query(sql, [nome_item, descricao, id, casal_id]); if (result.affectedRows === 0) { return res.status(404).json({ error: "Item não encontrado ou não pertence a este casal." }); } res.json({ message: "Item atualizado com sucesso!" }); } catch (err) { console.error("Erro ao atualizar item:", err); res.status(500).json({ error: "Erro interno do servidor." }); } });
@@ -149,6 +215,5 @@ app.post('/api/public/rsvp/auth', async (req, res) => {
     }
 });
 app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
+  console.log(`Servidor rodando na porta ${PORT}`);
 });
-
