@@ -97,21 +97,52 @@ app.delete('/api/grupos-convidados/:id', verificaToken, async (req, res) => { co
 app.get('/api/orcamento', verificaToken, async (req, res) => { try { const casal_id = req.usuario.id; const sql = "SELECT * FROM orcamentos WHERE casal_id = ?"; const [rows] = await db.query(sql, [casal_id]); if (rows.length === 0) return res.json({ id: null, valor_total_estimado: "0.00", casal_id }); return res.json(rows[0]); } catch (err) { return res.status(500).json({ error: "Erro interno do servidor." }); } });
 app.put('/api/orcamento', verificaToken, async (req, res) => { try { const casal_id = req.usuario.id; const { valor_total_estimado } = req.body; const sql = "INSERT INTO orcamentos (casal_id, valor_total_estimado) VALUES (?, ?) ON DUPLICATE KEY UPDATE valor_total_estimado = VALUES(valor_total_estimado)"; await db.query(sql, [casal_id, valor_total_estimado]); res.json({ message: "Orçamento salvo com sucesso!" }); } catch (err) { return res.status(500).json({ error: "Erro interno do servidor." }); } });
 app.get('/api/despesas', verificaToken, async (req, res) => { try { const casal_id = req.usuario.id; const sql = `SELECT d.* FROM despesas d JOIN orcamentos o ON d.orcamento_id = o.id WHERE o.casal_id = ? ORDER BY d.data_despesa DESC, d.id DESC`; const [despesas] = await db.query(sql, [casal_id]); res.json(despesas); } catch (err) { return res.status(500).json({ error: "Erro interno do servidor." }); } });
-app.post('/api/despesas', verificaToken, async (req, res) => { try { const casal_id = req.usuario.id; const { descricao, categoria, valor_pago, data_despesa } = req.body; const [orcamentos] = await db.query("SELECT id FROM orcamentos WHERE casal_id = ?", [casal_id]); if (orcamentos.length === 0) return res.status(400).json({ error: "Orçamento não encontrado." }); const orcamento_id = orcamentos[0].id; const sql = "INSERT INTO despesas (descricao, categoria, valor_pago, data_despesa, orcamento_id) VALUES (?, ?, ?, ?, ?)"; const values = [descricao, categoria, valor_pago || 0.00, data_despesa || null, orcamento_id]; const [result] = await db.query(sql, values); const [newDespesa] = await db.query("SELECT * FROM despesas WHERE id = ?", [result.insertId]); res.status(201).json(newDespesa[0]); } catch (err) { return res.status(500).json({ error: "Erro interno do servidor." }); } });
+
+// ROTA PARA CRIAR UMA DESPESA - CORRIGIDA
+app.post('/api/despesas', verificaToken, async (req, res) => { 
+    try { 
+        const casal_id = req.usuario.id; 
+        const { descricao, categoria, valor_pago, data_despesa } = req.body; 
+
+        const [orcamentos] = await db.query("SELECT id FROM orcamentos WHERE casal_id = ?", [casal_id]); 
+        if (orcamentos.length === 0) return res.status(400).json({ error: "Orçamento não encontrado." }); 
+        
+        const orcamento_id = orcamentos[0].id; 
+        
+        // ---- ALTERAÇÃO AQUI ----
+        // Garante que a data está no formato AAAA-MM-DD ou é nula.
+        let dataFormatada = null;
+        if (data_despesa) {
+            try {
+                // Pega a data no formato 'YYYY-MM-DDTHH:mm:ss.sssZ' e extrai só 'YYYY-MM-DD'
+                dataFormatada = new Date(data_despesa).toISOString().split('T')[0];
+            } catch (e) {
+                return res.status(400).json({ error: "Formato de data inválido." });
+            }
+        }
+        // ---- FIM DA ALTERAÇÃO ----
+        
+        const sql = "INSERT INTO despesas (descricao, categoria, valor_pago, data_despesa, orcamento_id) VALUES (?, ?, ?, ?, ?)"; 
+        const values = [descricao, categoria, valor_pago || 0.00, dataFormatada, orcamento_id]; 
+        
+        const [result] = await db.query(sql, values); 
+        const [newDespesa] = await db.query("SELECT * FROM despesas WHERE id = ?", [result.insertId]); 
+        res.status(201).json(newDespesa[0]); 
+    } catch (err) { 
+        console.error("Erro ao criar despesa:", err);
+        return res.status(500).json({ error: "Erro interno do servidor." }); 
+    } 
+});
 
 // ROTA PARA ATUALIZAR UMA DESPESA - CORRIGIDA
 app.put('/api/despesas/:id', verificaToken, async (req, res) => { 
     try { 
-        // ---- ALTERAÇÃO AQUI ----
         // Usamos parseInt para garantir que o ID é um número inteiro.
-        // Se o ID for "6:1", parseInt(req.params.id, 10) resultará em 6.
         const despesaId = parseInt(req.params.id, 10);
 
-        // Adicionamos uma verificação para o caso de o ID não ser um número válido
         if (isNaN(despesaId)) {
             return res.status(400).json({ error: "ID de despesa inválido." });
         }
-        // ---- FIM DA ALTERAÇÃO ----
         
         const casal_id = req.usuario.id; 
         const { descricao, categoria, valor_pago, data_despesa } = req.body; 
@@ -120,8 +151,21 @@ app.put('/api/despesas/:id', verificaToken, async (req, res) => {
         if (orcamentos.length === 0) return res.status(403).json({ error: "Acesso negado."}); 
         
         const orcamento_id = orcamentos[0].id; 
+
+        // ---- ALTERAÇÃO AQUI ----
+        // Garante que a data está no formato AAAA-MM-DD ou é nula.
+        let dataFormatada = null;
+        if (data_despesa) {
+            try {
+                dataFormatada = new Date(data_despesa).toISOString().split('T')[0];
+            } catch (e) {
+                return res.status(400).json({ error: "Formato de data inválido." });
+            }
+        }
+        // ---- FIM DA ALTERAÇÃO ----
+
         const sql = "UPDATE despesas SET descricao = ?, categoria = ?, valor_pago = ?, data_despesa = ? WHERE id = ? AND orcamento_id = ?"; 
-        const values = [descricao, categoria, valor_pago, data_despesa, despesaId, orcamento_id]; 
+        const values = [descricao, categoria, valor_pago, dataFormatada, despesaId, orcamento_id]; 
         
         const [result] = await db.query(sql, values); 
         
@@ -138,14 +182,12 @@ app.put('/api/despesas/:id', verificaToken, async (req, res) => {
 // ROTA PARA APAGAR UMA DESPESA - CORRIGIDA
 app.delete('/api/despesas/:id', verificaToken, async (req, res) => { 
     try { 
-        // ---- ALTERAÇÃO AQUI ----
         // Aplicamos a mesma correção para garantir que o ID é um número.
         const despesaId = parseInt(req.params.id, 10);
 
         if (isNaN(despesaId)) {
             return res.status(400).json({ error: "ID de despesa inválido." });
         }
-        // ---- FIM DA ALTERAÇÃO ----
 
         const casal_id = req.usuario.id; 
         
@@ -217,3 +259,4 @@ app.post('/api/public/rsvp/auth', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });
+
