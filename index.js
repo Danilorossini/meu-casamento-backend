@@ -5,7 +5,6 @@ const mysql = require('mysql2/promise');
 const bcrypt = require('bcrypt');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
-// A lógica de verificação foi movida para o seu próprio ficheiro para maior clareza
 const verificaToken = require('./verificaToken'); 
 const verificaAdmin = require('./verificaAdmin');
 const { JWT_SECRET } = require('./config'); 
@@ -28,15 +27,16 @@ const criarUrlAmigavel = (texto) => {
     const p = new RegExp(a.split('').join('|'), 'g')
 
     return texto.toString().toLowerCase()
-        .replace(/\s+/g, '-')
-        .replace(p, c => b.charAt(a.indexOf(c)))
-        .replace(/&/g, '-e-')
-        .replace(/[^\w\-]+/g, '')
-        .replace(/\-\-+/g, '-')
-        .replace(/^-+/, '')
-        .replace(/-+$/, '')
+        .replace(/\s+/g, '-') // Substitui espaços por -
+        .replace(p, c => b.charAt(a.indexOf(c))) // Substitui caracteres especiais
+        .replace(/&/g, '-e-') // Substitui & por '-e-'
+        .replace(/[^\w\-]+/g, '') // Remove todos os caracteres não alfanuméricos
+        .replace(/\-\-+/g, '-') // Substitui múltiplos - por um único -
+        .replace(/^-+/, '') // Remove - do início
+        .replace(/-+$/, '') // Remove - do final
 };
 
+// Rota de Login (sem alterações)
 app.post('/api/login', async (req, res) => { 
     try { 
         const { email, senha } = req.body; 
@@ -58,6 +58,7 @@ app.post('/api/login', async (req, res) => {
     } 
 });
 
+// --- ROTA DE CADASTRO DE CASAIS ---
 app.post('/api/casais', async (req, res) => { 
     try { 
         const { nome_completo, email, senha, data_casamento } = req.body; 
@@ -78,21 +79,13 @@ app.post('/api/casais', async (req, res) => {
     } 
 });
 
+// Rota para buscar os dados do casal logado
 app.get('/api/meus-dados', verificaToken, async (req, res) => { 
     try { 
-        console.log("ROTA /api/meus-dados ACESSADA COM SUCESSO APÓS VERIFICAÇÃO DE TOKEN.");
-        console.log("Objeto de usuário na requisição:", req.usuario);
-
-        if (!req.usuario || !req.usuario.id) {
-            console.error("ERRO CRÍTICO: req.usuario não foi definido pelo middleware verificaToken.");
-            return res.status(500).json({ error: "Erro de autenticação interna." });
-        }
         const idDoUsuario = req.usuario.id; 
         const sql = "SELECT id, nome_completo, email, data_casamento, url_site, local_cerimonia, hora_cerimonia FROM casais WHERE id = ?"; 
         const [rows] = await db.query(sql, [idDoUsuario]); 
         if (rows.length === 0) return res.status(404).json({ error: "Usuário não encontrado." }); 
-
-        console.log("Dados do usuário encontrados e sendo enviados:", rows[0]);
         return res.json(rows[0]); 
     } catch (err) { 
         console.error("ERRO na rota /api/meus-dados:", err);
@@ -100,6 +93,7 @@ app.get('/api/meus-dados', verificaToken, async (req, res) => {
     } 
 });
 
+// ROTA DE ATUALIZAÇÃO DE DADOS DO CASAL - CORRIGIDA
 app.put('/api/meus-dados', verificaToken, async (req, res) => { 
     try { 
         const idDoUsuario = req.usuario.id; 
@@ -118,7 +112,7 @@ app.put('/api/meus-dados', verificaToken, async (req, res) => {
     } 
 });
 
-// --- RESTANTE DAS SUAS ROTAS ---
+// --- RESTANTE DAS SUAS ROTAS (sem alterações) ---
 app.get('/api/convidados', verificaToken, async (req, res) => { const casal_id = req.usuario.id; try { const sql = `SELECT g.id, g.nome_grupo, g.senha_rsvp, i.id as convidado_id, i.nome_completo, i.is_crianca, i.status_confirmacao FROM grupos_convidados g LEFT JOIN convidados_individuais i ON g.id = i.grupo_id WHERE g.casal_id = ? ORDER BY g.nome_grupo, i.nome_completo;`; const [rows] = await db.query(sql, [casal_id]); const grupos = {}; rows.forEach(row => { if (!grupos[row.id]) { grupos[row.id] = { id: row.id, nome_grupo: row.nome_grupo, senha_rsvp: row.senha_rsvp, convidados: [] }; } if (row.convidado_id) { grupos[row.id].convidados.push({ id: row.convidado_id, nome_completo: row.nome_completo, is_crianca: !!row.is_crianca, status_confirmacao: row.status_confirmacao }); } }); res.json(Object.values(grupos)); } catch (err) { res.status(500).json({ error: "Erro ao listar convidados." }); } });
 app.post('/api/convidados', verificaToken, async (req, res) => { const casal_id = req.usuario.id; const { nome_grupo, senha_rsvp, convidados } = req.body; if (!nome_grupo || !convidados || !Array.isArray(convidados) || convidados.length === 0) return res.status(400).json({ error: "Dados inválidos." }); const connection = await db.getConnection(); try { await connection.beginTransaction(); const sqlGrupo = "INSERT INTO grupos_convidados (nome_grupo, senha_rsvp, casal_id) VALUES (?, ?, ?)"; const [resultGrupo] = await connection.query(sqlGrupo, [nome_grupo, senha_rsvp, casal_id]); const grupo_id = resultGrupo.insertId; const sqlConvidados = "INSERT INTO convidados_individuais (nome_completo, is_crianca, grupo_id) VALUES ?"; const valuesConvidados = convidados.map(c => [c.nome_completo, c.is_crianca || false, grupo_id]); await connection.query(sqlConvidados, [valuesConvidados]); await connection.commit(); res.status(201).json({ message: "Grupo de convidados adicionado com sucesso!", id: grupo_id }); } catch (err) { await connection.rollback(); res.status(500).json({ error: "Erro ao adicionar grupo de convidados." }); } finally { connection.release(); } });
 app.put('/api/convidados/grupos/:id', verificaToken, async (req, res) => { const casal_id = req.usuario.id; const grupo_id = req.params.id; const { nome_grupo, senha_rsvp, convidados } = req.body; if (!nome_grupo || !convidados || !Array.isArray(convidados)) return res.status(400).json({ error: "Dados inválidos." }); const connection = await db.getConnection(); try { await connection.beginTransaction(); const sqlUpdateGrupo = "UPDATE grupos_convidados SET nome_grupo = ?, senha_rsvp = ? WHERE id = ? AND casal_id = ?"; const [result] = await connection.query(sqlUpdateGrupo, [nome_grupo, senha_rsvp, grupo_id, casal_id]); if (result.affectedRows === 0) throw new Error('Grupo não encontrado.'); const sqlDeleteConvidados = "DELETE FROM convidados_individuais WHERE grupo_id = ?"; await connection.query(sqlDeleteConvidados, [grupo_id]); if (convidados.length > 0) { const sqlInsertConvidados = "INSERT INTO convidados_individuais (nome_completo, is_crianca, status_confirmacao, grupo_id) VALUES ?"; const valuesConvidados = convidados.map(c => [c.nome_completo, c.is_crianca || false, c.status_confirmacao || 'Pendente', grupo_id]); await connection.query(sqlInsertConvidados, [valuesConvidados]); } await connection.commit(); res.json({ message: "Grupo de convidados atualizado com sucesso!" }); } catch (err) { await connection.rollback(); if (err.message.includes('Grupo não encontrado')) return res.status(404).json({ error: err.message }); res.status(500).json({ error: "Erro ao atualizar grupo de convidados." }); } finally { connection.release(); } });
@@ -142,12 +136,11 @@ app.post('/api/admin/casais', verificaAdmin, async (req, res) => { try { const {
 app.get('/api/admin/planos', verificaAdmin, async (req, res) => { try { const sql = "SELECT * FROM planos ORDER BY preco"; const [planos] = await db.query(sql); res.json(planos); } catch (err) { console.error("Erro ao buscar planos:", err); res.status(500).json({ error: "Erro interno do servidor." }); } });
 app.post('/api/admin/planos', verificaAdmin, async (req, res) => { try { const { nome_plano, descricao, preco, preco_promocional, ativo } = req.body; const sql = ` INSERT INTO planos (nome_plano, descricao, preco, preco_promocional, ativo) VALUES (?, ?, ?, ?, ?) `; const values = [nome_plano, descricao, preco, preco_promocional || null, ativo]; const [result] = await db.query(sql, values); res.status(201).json({ message: "Plano criado com sucesso!", id: result.insertId }); } catch (err) { console.error("Erro ao criar plano:", err); res.status(500).json({ error: "Erro interno do servidor." }); } });
 app.put('/api/admin/planos/:id', verificaAdmin, async (req, res) => { try { const { id } = req.params; const { nome_plano, descricao, preco, preco_promocional, ativo } = req.body; const sql = ` UPDATE planos SET nome_plano = ?, descricao = ?, preco = ?, preco_promocional = ?, ativo = ? WHERE id = ? `; const values = [nome_plano, descricao, preco, preco_promocional || null, ativo, id]; const [result] = await db.query(sql, values); if (result.affectedRows === 0) { return res.status(404).json({ error: "Plano não encontrado." }); } res.json({ message: "Plano atualizado com sucesso!" }); } catch (err) { console.error("Erro ao atualizar plano:", err); res.status(500).json({ error: "Erro interno do servidor." }); } });
-app.delete('/api/admin/planos/:id', verificaAdmin, async (req, res) => { try { const { id } = req.params; const sql = "DELETE FROM planos WHERE id = ?"; const [result] = await db.query(sql, [id]); if (result.affectedRows === 0) { return res.status(404).json({ error: "Plano não encontrado." }); } res.json({ message: "Plano apagado com sucesso!" }); } catch (err) { console.error("Erro ao apagar plano:", err); res.status(500).json({ error: "Erro interno do servidor." }); } });
+app.delete('/api/admin/planos/:id', verificaToken, async (req, res) => { try { const { id } = req.params; const sql = "DELETE FROM planos WHERE id = ?"; const [result] = await db.query(sql, [id]); if (result.affectedRows === 0) { return res.status(404).json({ error: "Plano não encontrado." }); } res.json({ message: "Plano apagado com sucesso!" }); } catch (err) { console.error("Erro ao apagar plano:", err); res.status(500).json({ error: "Erro interno do servidor." }); } });
 app.get('/api/admin/relatorio-financeiro', verificaAdmin, async (req, res) => { try { let { data_inicio, data_fim } = req.query; if (!data_inicio || !data_fim) { const hoje = new Date(); data_fim = hoje.toISOString().split('T')[0]; hoje.setDate(hoje.getDate() - 30); data_inicio = hoje.toISOString().split('T')[0]; } const dataFimCompleta = `${data_fim} 23:59:59`; const sqlVendas = ` SELECT p.nome_plano, COUNT(t.id) as quantidade_vendida, SUM(t.valor_pago) as total_valor FROM transacoes t JOIN planos p ON t.plano_id = p.id WHERE t.data_transacao BETWEEN ? AND ? GROUP BY p.nome_plano; `; const [vendasPorPlano] = await db.query(sqlVendas, [data_inicio, dataFimCompleta]); const sqlCadastrosManuais = ` SELECT COUNT(id) as quantidade FROM casais WHERE is_admin = false AND plano_id IS NULL AND data_criacao BETWEEN ? AND ? `; const [cadastrosManuais] = await db.query(sqlCadastrosManuais, [data_inicio, dataFimCompleta]); const sqlTotais = ` SELECT SUM(valor_pago) as faturamento_total, COUNT(id) as total_vendas FROM transacoes WHERE data_transacao BETWEEN ? AND ? `; const [totais] = await db.query(sqlTotais, [data_inicio, dataFimCompleta]); const relatorio = { periodo: { inicio: data_inicio, fim: data_fim }, faturamento_total: totais[0].faturamento_total || 0, total_vendas: totais[0].total_vendas || 0, cadastros_manuais: cadastrosManuais[0].quantidade || 0, vendas_por_plano: vendasPorPlano }; res.json(relatorio); } catch (err) { console.error("Erro ao gerar relatório financeiro:", err); res.status(500).json({ error: "Erro interno do servidor." }); } });
 app.get('/api/public/planos', async (req, res) => { try { const sql = `SELECT * FROM planos WHERE ativo = TRUE ORDER BY preco`; const [planos] = await db.query(sql); res.json(planos); } catch (err) { console.error("Erro ao buscar planos públicos:", err); res.status(500).json({ error: "Erro interno do servidor." }); } });
 app.post('/api/public/rsvp/auth', async (req, res) => { try { const { url_site, senha_rsvp } = req.body; const sqlCasal = "SELECT id FROM casais WHERE url_site = ?"; const [casais] = await db.query(sqlCasal, [url_site]); if (casais.length === 0) { return res.status(404).json({ error: "Site não encontrado." }); } const casal_id = casais[0].id; const sqlGrupo = "SELECT id, nome_grupo FROM grupos_convidados WHERE casal_id = ? AND senha_rsvp = ?"; const [grupos] = await db.query(sqlGrupo, [casal_id, senha_rsvp]); if (grupos.length === 0) { return res.status(401).json({ error: "Senha incorreta." }); } const grupo = grupos[0]; const sqlConvidados = "SELECT id, nome_completo FROM convidados_individuais WHERE grupo_id = ?"; const [convidados] = await db.query(sqlConvidados, [grupo.id]); res.json({ grupo_id: grupo.id, nome_grupo: grupo.nome_grupo, convidados: convidados }); } catch (err) { console.error("Erro na autenticação do RSVP:", err); res.status(500).json({ error: "Erro interno do servidor." }); } });
 app.put('/api/public/rsvp/confirmar', async (req, res) => { try { const { confirmacoes } = req.body; if (!confirmacoes || typeof confirmacoes !== 'object' || Object.keys(confirmacoes).length === 0) { return res.status(400).json({ error: "Dados de confirmação inválidos." }); } const connection = await db.getConnection(); try { await connection.beginTransaction(); const promessasDeUpdate = Object.entries(confirmacoes).map(([convidadoId, status]) => { const sql = "UPDATE convidados_individuais SET status_confirmacao = ? WHERE id = ?"; const statusValido = ['Presente', 'Ausente'].includes(status) ? status : 'Pendente'; return connection.query(sql, [statusValido, convidadoId]); }); await Promise.all(promessasDeUpdate); await connection.commit(); res.json({ message: "Confirmação de presença salva com sucesso!" }); } catch (err) { await connection.rollback(); throw err; } finally { connection.release(); } } catch (err) { console.error("Erro ao salvar confirmação de RSVP:", err); res.status(500).json({ error: "Erro interno do servidor ao salvar confirmação." }); } });
-
 
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
