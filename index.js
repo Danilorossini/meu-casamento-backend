@@ -5,7 +5,7 @@ const mysql = require('mysql2/promise');
 const bcrypt = require('bcrypt');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
-const path = require('path');
+const path = require('path'); // IMPORTA O MÓDULO 'path'
 const verificaToken = require('./verificaToken'); 
 const verificaAdmin = require('./verificaAdmin');
 const { JWT_SECRET } = require('./config'); 
@@ -15,6 +15,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Serve os ficheiros estáticos (HTML, CSS, JS do site público) da pasta 'public'
 app.use(express.static('public'));
 
 const PORT = process.env.PORT || 3001;
@@ -37,8 +38,7 @@ const criarUrlAmigavel = (texto) => {
         .replace(/-+$/, '')
 };
 
-// --- ROTAS DE API ---
-
+// --- TODAS AS SUAS ROTAS DE API FICAM AQUI ---
 app.post('/api/login', async (req, res) => { 
     try { 
         const { email, senha } = req.body; 
@@ -111,6 +111,7 @@ app.put('/api/meus-dados', verificaToken, async (req, res) => {
     } 
 });
 
+// ... (todas as suas outras rotas de API continuam aqui)
 app.get('/api/convidados', verificaToken, async (req, res) => { const casal_id = req.usuario.id; try { const sql = `SELECT g.id, g.nome_grupo, g.senha_rsvp, i.id as convidado_id, i.nome_completo, i.is_crianca, i.status_confirmacao FROM grupos_convidados g LEFT JOIN convidados_individuais i ON g.id = i.grupo_id WHERE g.casal_id = ? ORDER BY g.nome_grupo, i.nome_completo;`; const [rows] = await db.query(sql, [casal_id]); const grupos = {}; rows.forEach(row => { if (!grupos[row.id]) { grupos[row.id] = { id: row.id, nome_grupo: row.nome_grupo, senha_rsvp: row.senha_rsvp, convidados: [] }; } if (row.convidado_id) { grupos[row.id].convidados.push({ id: row.convidado_id, nome_completo: row.nome_completo, is_crianca: !!row.is_crianca, status_confirmacao: row.status_confirmacao }); } }); res.json(Object.values(grupos)); } catch (err) { res.status(500).json({ error: "Erro ao listar convidados." }); } });
 app.post('/api/convidados', verificaToken, async (req, res) => { const casal_id = req.usuario.id; const { nome_grupo, senha_rsvp, convidados } = req.body; if (!nome_grupo || !convidados || !Array.isArray(convidados) || convidados.length === 0) return res.status(400).json({ error: "Dados inválidos." }); const connection = await db.getConnection(); try { await connection.beginTransaction(); const sqlGrupo = "INSERT INTO grupos_convidados (nome_grupo, senha_rsvp, casal_id) VALUES (?, ?, ?)"; const [resultGrupo] = await connection.query(sqlGrupo, [nome_grupo, senha_rsvp, casal_id]); const grupo_id = resultGrupo.insertId; const sqlConvidados = "INSERT INTO convidados_individuais (nome_completo, is_crianca, grupo_id) VALUES ?"; const valuesConvidados = convidados.map(c => [c.nome_completo, c.is_crianca || false, grupo_id]); await connection.query(sqlConvidados, [valuesConvidados]); await connection.commit(); res.status(201).json({ message: "Grupo de convidados adicionado com sucesso!", id: grupo_id }); } catch (err) { await connection.rollback(); res.status(500).json({ error: "Erro ao adicionar grupo de convidados." }); } finally { connection.release(); } });
 app.put('/api/convidados/grupos/:id', verificaToken, async (req, res) => { const casal_id = req.usuario.id; const grupo_id = req.params.id; const { nome_grupo, senha_rsvp, convidados } = req.body; if (!nome_grupo || !convidados || !Array.isArray(convidados)) return res.status(400).json({ error: "Dados inválidos." }); const connection = await db.getConnection(); try { await connection.beginTransaction(); const sqlUpdateGrupo = "UPDATE grupos_convidados SET nome_grupo = ?, senha_rsvp = ? WHERE id = ? AND casal_id = ?"; const [result] = await connection.query(sqlUpdateGrupo, [nome_grupo, senha_rsvp, grupo_id, casal_id]); if (result.affectedRows === 0) throw new Error('Grupo não encontrado.'); const sqlDeleteConvidados = "DELETE FROM convidados_individuais WHERE grupo_id = ?"; await connection.query(sqlDeleteConvidados, [grupo_id]); if (convidados.length > 0) { const sqlInsertConvidados = "INSERT INTO convidados_individuais (nome_completo, is_crianca, status_confirmacao, grupo_id) VALUES ?"; const valuesConvidados = convidados.map(c => [c.nome_completo, c.is_crianca || false, c.status_confirmacao || 'Pendente', grupo_id]); await connection.query(sqlInsertConvidados, [valuesConvidados]); } await connection.commit(); res.json({ message: "Grupo de convidados atualizado com sucesso!" }); } catch (err) { await connection.rollback(); if (err.message.includes('Grupo não encontrado')) return res.status(404).json({ error: err.message }); res.status(500).json({ error: "Erro ao atualizar grupo de convidados." }); } finally { connection.release(); } });
