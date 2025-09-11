@@ -155,6 +155,7 @@ app.post('/api/public/rsvp/auth', async (req, res) => { try { const { url_site, 
 app.put('/api/public/rsvp/confirmar', async (req, res) => { try { const { confirmacoes } = req.body; if (!confirmacoes || typeof confirmacoes !== 'object' || Object.keys(confirmacoes).length === 0) { return res.status(400).json({ error: "Dados de confirmação inválidos." }); } const connection = await db.getConnection(); try { await connection.beginTransaction(); const promessasDeUpdate = Object.entries(confirmacoes).map(([convidadoId, status]) => { const sql = "UPDATE convidados_individuais SET status_confirmacao = ? WHERE id = ?"; const statusValido = ['Presente', 'Ausente'].includes(status) ? status : 'Pendente'; return connection.query(sql, [statusValido, convidadoId]); }); await Promise.all(promessasDeUpdate); await connection.commit(); res.json({ message: "Confirmação de presença salva com sucesso!" }); } catch (err) { await connection.rollback(); throw err; } finally { connection.release(); } } catch (err) { console.error("Erro ao salvar confirmação de RSVP:", err); res.status(500).json({ error: "Erro interno do servidor ao salvar confirmação." }); } });
 
 // ROTA "APANHA-TUDO" (CATCH-ALL)
+// Esta deve ser a ÚLTIMA rota da aplicação (antes do app.listen).
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
