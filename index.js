@@ -5,7 +5,7 @@ const mysql = require('mysql2/promise');
 const bcrypt = require('bcrypt');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
-const path = require('path'); // Adicionado para a rota final
+const path = require('path');
 const verificaToken = require('./verificaToken'); 
 const verificaAdmin = require('./verificaAdmin');
 const { JWT_SECRET } = require('./config'); 
@@ -15,6 +15,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Serve os ficheiros estáticos (HTML, CSS, JS do site público) da pasta 'public'
 app.use(express.static('public'));
 
 const PORT = process.env.PORT || 3001;
@@ -134,7 +135,20 @@ app.post('/api/admin/casais', verificaAdmin, async (req, res) => { try { const {
 app.get('/api/admin/planos', verificaAdmin, async (req, res) => { try { const sql = "SELECT * FROM planos ORDER BY preco"; const [planos] = await db.query(sql); res.json(planos); } catch (err) { console.error("Erro ao buscar planos:", err); res.status(500).json({ error: "Erro interno do servidor." }); } });
 app.post('/api/admin/planos', verificaAdmin, async (req, res) => { try { const { nome_plano, descricao, preco, preco_promocional, ativo } = req.body; const sql = ` INSERT INTO planos (nome_plano, descricao, preco, preco_promocional, ativo) VALUES (?, ?, ?, ?, ?) `; const values = [nome_plano, descricao, preco, preco_promocional || null, ativo]; const [result] = await db.query(sql, values); res.status(201).json({ message: "Plano criado com sucesso!", id: result.insertId }); } catch (err) { console.error("Erro ao criar plano:", err); res.status(500).json({ error: "Erro interno do servidor." }); } });
 app.put('/api/admin/planos/:id', verificaAdmin, async (req, res) => { try { const { id } = req.params; const { nome_plano, descricao, preco, preco_promocional, ativo } = req.body; const sql = ` UPDATE planos SET nome_plano = ?, descricao = ?, preco = ?, preco_promocional = ?, ativo = ? WHERE id = ? `; const values = [nome_plano, descricao, preco, preco_promocional || null, ativo, id]; const [result] = await db.query(sql, values); if (result.affectedRows === 0) { return res.status(404).json({ error: "Plano não encontrado." }); } res.json({ message: "Plano atualizado com sucesso!" }); } catch (err) { console.error("Erro ao atualizar plano:", err); res.status(500).json({ error: "Erro interno do servidor." }); } });
-app.delete('/api/admin/planos/:id', verificaAdmin, async (req, res) => { try { const { id } = req.params; const sql = "DELETE FROM planos WHERE id = ?"; const [result] = await db.query(sql, [id]); if (result.affectedRows === 0) { return res.status(404).json({ error: "Plano não encontrado." }); } res.json({ message: "Plano apagado com sucesso!" }); } catch (err) { console.error("Erro ao apagar plano:", err); res.status(500).json({ error: "Erro interno do servidor." }); } });
+app.delete('/api/admin/planos/:id', verificaAdmin, async (req, res) => { 
+    try { 
+        const { id } = req.params; 
+        const sql = "DELETE FROM planos WHERE id = ?"; 
+        const [result] = await db.query(sql, [id]); 
+        if (result.affectedRows === 0) { 
+            return res.status(404).json({ error: "Plano não encontrado." }); 
+        } 
+        res.json({ message: "Plano apagado com sucesso!" }); 
+    } catch (err) { 
+        console.error("Erro ao apagar plano:", err); 
+        res.status(500).json({ error: "Erro interno do servidor." }); 
+    } 
+});
 app.get('/api/admin/relatorio-financeiro', verificaAdmin, async (req, res) => { try { let { data_inicio, data_fim } = req.query; if (!data_inicio || !data_fim) { const hoje = new Date(); data_fim = hoje.toISOString().split('T')[0]; hoje.setDate(hoje.getDate() - 30); data_inicio = hoje.toISOString().split('T')[0]; } const dataFimCompleta = `${data_fim} 23:59:59`; const sqlVendas = ` SELECT p.nome_plano, COUNT(t.id) as quantidade_vendida, SUM(t.valor_pago) as total_valor FROM transacoes t JOIN planos p ON t.plano_id = p.id WHERE t.data_transacao BETWEEN ? AND ? GROUP BY p.nome_plano; `; const [vendasPorPlano] = await db.query(sqlVendas, [data_inicio, dataFimCompleta]); const sqlCadastrosManuais = ` SELECT COUNT(id) as quantidade FROM casais WHERE is_admin = false AND plano_id IS NULL AND data_criacao BETWEEN ? AND ? `; const [cadastrosManuais] = await db.query(sqlCadastrosManuais, [data_inicio, dataFimCompleta]); const sqlTotais = ` SELECT SUM(valor_pago) as faturamento_total, COUNT(id) as total_vendas FROM transacoes WHERE data_transacao BETWEEN ? AND ? `; const [totais] = await db.query(sqlTotais, [data_inicio, dataFimCompleta]); const relatorio = { periodo: { inicio: data_inicio, fim: data_fim }, faturamento_total: totais[0].faturamento_total || 0, total_vendas: totais[0].total_vendas || 0, cadastros_manuais: cadastrosManuais[0].quantidade || 0, vendas_por_plano: vendasPorPlano }; res.json(relatorio); } catch (err) { console.error("Erro ao gerar relatório financeiro:", err); res.status(500).json({ error: "Erro interno do servidor." }); } });
 app.get('/api/public/planos', async (req, res) => { try { const sql = `SELECT * FROM planos WHERE ativo = TRUE ORDER BY preco`; const [planos] = await db.query(sql); res.json(planos); } catch (err) { console.error("Erro ao buscar planos públicos:", err); res.status(500).json({ error: "Erro interno do servidor." }); } });
 app.post('/api/public/rsvp/auth', async (req, res) => { try { const { url_site, senha_rsvp } = req.body; const sqlCasal = "SELECT id FROM casais WHERE url_site = ?"; const [casais] = await db.query(sqlCasal, [url_site]); if (casais.length === 0) { return res.status(404).json({ error: "Site não encontrado." }); } const casal_id = casais[0].id; const sqlGrupo = "SELECT id, nome_grupo FROM grupos_convidados WHERE casal_id = ? AND senha_rsvp = ?"; const [grupos] = await db.query(sqlGrupo, [casal_id, senha_rsvp]); if (grupos.length === 0) { return res.status(401).json({ error: "Senha incorreta." }); } const grupo = grupos[0]; const sqlConvidados = "SELECT id, nome_completo FROM convidados_individuais WHERE grupo_id = ?"; const [convidados] = await db.query(sqlConvidados, [grupo.id]); res.json({ grupo_id: grupo.id, nome_grupo: grupo.nome_grupo, convidados: convidados }); } catch (err) { console.error("Erro na autenticação do RSVP:", err); res.status(500).json({ error: "Erro interno do servidor." }); } });
