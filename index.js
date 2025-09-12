@@ -6,6 +6,7 @@ const bcrypt = require('bcrypt');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const path = require('path');
+// const nodemailer = require('nodemailer'); // <-- REMOVIDO
 const verificaToken = require('./verificaToken'); 
 const verificaAdmin = require('./verificaAdmin');
 const { JWT_SECRET } = require('./config'); 
@@ -20,6 +21,8 @@ app.use(express.static('public'));
 
 const PORT = process.env.PORT || 3001;
 const saltRounds = 10;
+
+// A configuração do transporter do Nodemailer foi removida daqui
 
 // Função para criar uma URL amigável a partir do nome
 const criarUrlAmigavel = (texto) => {
@@ -81,6 +84,8 @@ app.post('/api/casais', async (req, res) => {
     } 
 });
 
+// A rota /api/contato foi removida daqui
+
 app.get('/api/meus-dados', verificaToken, async (req, res) => { 
     try { 
         const idDoUsuario = req.usuario.id; 
@@ -93,6 +98,8 @@ app.get('/api/meus-dados', verificaToken, async (req, res) => {
         return res.status(500).json({ error: "Erro interno do servidor." }); 
     } 
 });
+
+// ... (todo o resto do seu ficheiro continua igual) ...
 
 app.put('/api/meus-dados', verificaToken, async (req, res) => { 
     try { 
@@ -131,27 +138,27 @@ app.put('/api/public/cha-de-panela/:itemId/presentear', async (req, res) => { tr
 app.put('/api/public/cha-de-panela/presentear-multiplos', async (req, res) => { try { const { itemIds, nome_convidado } = req.body; if (!nome_convidado) { return res.status(400).json({ error: "O seu nome é obrigatório para dar os presentes." }); } if (!itemIds || !Array.isArray(itemIds) || itemIds.length === 0) { return res.status(400).json({ error: "Você precisa de selecionar pelo menos um item." }); } const connection = await db.getConnection(); await connection.beginTransaction(); try { const placeholders = itemIds.map(() => '?').join(','); const [itens] = await connection.query(`SELECT id, presenteado FROM cha_de_panela_itens WHERE id IN (${placeholders}) FOR UPDATE`, itemIds); if (itens.length !== itemIds.length) { throw new Error("Um ou mais itens selecionados não foram encontrados."); } const itemJaPresenteado = itens.some(item => item.presenteado); if (itemJaPresenteado) { await connection.rollback(); return res.status(409).json({ error: "Oops! Um dos itens que você selecionou já foi escolhido por outra pessoa. Por favor, atualize a página e tente novamente." }); } const updateSql = `UPDATE cha_de_panela_itens SET presenteado = TRUE, nome_convidado_presenteou = ? WHERE id IN (${placeholders})`; await connection.query(updateSql, [nome_convidado, ...itemIds]); await connection.commit(); res.json({ message: "Muito obrigado pelos seus presentes!" }); } catch (err) { await connection.rollback(); throw err; } finally { connection.release(); } } catch (err) { console.error("Erro ao presentear múltiplos itens:", err); res.status(500).json({ error: "Erro interno do servidor." }); } });
 
 app.get('/api/admin/casais', verificaAdmin, async (req, res) => {
-    try {
-        const sql = `
-            SELECT 
-                c.id, 
-                c.nome_completo, 
-                c.email, 
-                c.url_site, 
-                c.data_criacao, 
-                p.nome_plano,
-                c.plano_id
-            FROM casais c 
-            LEFT JOIN planos p ON c.plano_id = p.id 
-            WHERE c.is_admin = false 
-            ORDER BY c.data_criacao DESC
-        `;
-        const [casais] = await db.query(sql);
-        res.json(casais);
-    } catch (err) {
-        console.error("Erro ao buscar todos os casais:", err);
-        res.status(500).json({ error: "Erro interno do servidor." });
-    }
+    try {
+        const sql = `
+            SELECT 
+                c.id, 
+                c.nome_completo, 
+                c.email, 
+                c.url_site, 
+                c.data_criacao, 
+                p.nome_plano,
+                c.plano_id
+            FROM casais c 
+            LEFT JOIN planos p ON c.plano_id = p.id 
+            WHERE c.is_admin = false 
+            ORDER BY c.data_criacao DESC
+        `;
+        const [casais] = await db.query(sql);
+        res.json(casais);
+    } catch (err) {
+        console.error("Erro ao buscar todos os casais:", err);
+        res.status(500).json({ error: "Erro interno do servidor." });
+    }
 });
 
 app.put('/api/admin/casais/:id/plano', verificaAdmin, async (req, res) => { try { const { id } = req.params; const { plano_id } = req.body; const novoPlanoId = plano_id === 'nenhum' ? null : plano_id; const sql = "UPDATE casais SET plano_id = ? WHERE id = ?"; const [result] = await db.query(sql, [novoPlanoId, id]); if (result.affectedRows === 0) { return res.status(404).json({ error: "Cliente não encontrado." }); } res.json({ message: "Plano do cliente atualizado com sucesso!" }); } catch (err) { console.error("Erro ao atualizar o plano do cliente:", err); res.status(500).json({ error: "Erro interno do servidor." }); } });
@@ -186,4 +193,3 @@ app.get('*', (req, res) => {
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });
-
