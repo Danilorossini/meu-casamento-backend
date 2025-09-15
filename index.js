@@ -6,7 +6,6 @@ const bcrypt = require('bcrypt');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const path = require('path');
-// const nodemailer = require('nodemailer'); // <-- REMOVIDO
 const verificaToken = require('./verificaToken'); 
 const verificaAdmin = require('./verificaAdmin');
 const { JWT_SECRET } = require('./config'); 
@@ -21,8 +20,6 @@ app.use(express.static('public'));
 
 const PORT = process.env.PORT || 3001;
 const saltRounds = 10;
-
-// A configuração do transporter do Nodemailer foi removida daqui
 
 // Função para criar uma URL amigável a partir do nome
 const criarUrlAmigavel = (texto) => {
@@ -84,12 +81,10 @@ app.post('/api/casais', async (req, res) => {
     } 
 });
 
-// A rota /api/contato foi removida daqui
-
 app.get('/api/meus-dados', verificaToken, async (req, res) => { 
     try { 
         const idDoUsuario = req.usuario.id; 
-        const sql = "SELECT id, nome_completo, email, data_casamento, url_site, local_cerimonia, hora_cerimonia FROM casais WHERE id = ?"; 
+        const sql = "SELECT id, nome_completo, email, data_casamento, url_site, local_cerimonia, hora_cerimonia, chave_pix FROM casais WHERE id = ?"; 
         const [rows] = await db.query(sql, [idDoUsuario]); 
         if (rows.length === 0) return res.status(404).json({ error: "Usuário não encontrado." }); 
         return res.json(rows[0]); 
@@ -99,18 +94,16 @@ app.get('/api/meus-dados', verificaToken, async (req, res) => {
     } 
 });
 
-// ... (todo o resto do seu ficheiro continua igual) ...
-
 app.put('/api/meus-dados', verificaToken, async (req, res) => { 
     try { 
         const idDoUsuario = req.usuario.id; 
-        const { nome_completo, email, data_casamento, local_cerimonia, hora_cerimonia } = req.body; 
+        const { nome_completo, email, data_casamento, local_cerimonia, hora_cerimonia, chave_pix } = req.body; 
         const url_site = criarUrlAmigavel(nome_completo);
-        const sql = `UPDATE casais SET nome_completo = ?, email = ?, url_site = ?, data_casamento = ?, local_cerimonia = ?, hora_cerimonia = ? WHERE id = ?`; 
-        const values = [nome_completo, email, url_site, data_casamento || null, local_cerimonia, hora_cerimonia || null, idDoUsuario]; 
+        const sql = `UPDATE casais SET nome_completo = ?, email = ?, url_site = ?, data_casamento = ?, local_cerimonia = ?, hora_cerimonia = ?, chave_pix = ? WHERE id = ?`; 
+        const values = [nome_completo, email, url_site, data_casamento || null, local_cerimonia, hora_cerimonia || null, chave_pix, idDoUsuario]; 
         const [result] = await db.query(sql, values); 
         if (result.affectedRows === 0) return res.status(404).json({ error: "Usuário não encontrado." }); 
-        const [updatedUser] = await db.query("SELECT id, nome_completo, email, data_casamento, url_site, local_cerimonia, hora_cerimonia FROM casais WHERE id = ?", [idDoUsuario]); 
+        const [updatedUser] = await db.query("SELECT id, nome_completo, email, data_casamento, url_site, local_cerimonia, hora_cerimonia, chave_pix FROM casais WHERE id = ?", [idDoUsuario]); 
         res.json(updatedUser[0]); 
     } catch (err) { 
         console.error("Erro ao atualizar dados do casal:", err);
@@ -193,3 +186,4 @@ app.get('*', (req, res) => {
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });
+
